@@ -1,0 +1,230 @@
+USE [BD_RHSSGG]
+GO
+/****** Object:  StoredProcedure [dbo].[que_BPPersonal_listar_Foto]    Script Date: 23/10/2024 15:01:39 ******/
+SET ANSI_NULLS ON
+GO
+SET QUOTED_IDENTIFIER ON
+GO
+CREATE PROCEDURE [dbo].[que_BPPersonal_listar_Foto]
+@vcCodigo AS NVARCHAR(20)
+AS
+BEGIN
+SELECT
+            vcNombreCompleto			= RTRIM(REPLACE(CONCAT(p.vcprimernombre,' ',p.vcsegundonombre,' ',p.vcapellidopaterno,' ',p.vcapellidomaterno),'  ',' ')),
+			(SELECT TOP 1 vcNumeroDocumento FROM [BD_Personal].[dbo].[PersonalIdentificacion] WHERE kInPersonal = P.kInPersonal AND inTipoDocumento IN (1,2,61)) AS vcNumeroDocumento,
+            archivo			= (CASE  
+								WHEN pa.vcNombreArchivo IS NULL THEN NULL
+								WHEN pa.vcNombreArchivo IS NOT NULL THEN CONCAT(p.vccodigo,pa.vcExtension)
+								END),
+			imagen			= (SELECT CAST(pa.vbDatos as varbinary(max)) FOR XML PATH(''), BINARY BASE64),
+            mime			= pa.vcMime,
+            extension		= pa.vcExtension
+            FROM [BD_Personal].[dbo].[Personal] p
+            LEFT JOIN [BD_Personal].[dbo].[PersonalArchivo] pa ON pa.kinpersonal = p.kinpersonal and inTipoArchivo = 40
+            INNER JOIN [BD_Personal].[dbo].[Seccion] se ON se.kInSeccion = p.kInSeccion
+            INNER JOIN [BD_RRHH].[dbo].[Posicion] po ON po.inPosicion = p.inPosicion
+            WHERE p.inEstado=95 AND p.kInEmpleador IS null
+            AND p.vccodigo LIKE @vcCodigo;
+END
+GO
+/****** Object:  StoredProcedure [dbo].[que_BPPersonalConsultar_listar]    Script Date: 23/10/2024 15:01:39 ******/
+SET ANSI_NULLS ON
+GO
+SET QUOTED_IDENTIFIER ON
+GO
+CREATE PROCEDURE [dbo].[que_BPPersonalConsultar_listar]
+  @vcFiltro VARCHAR(250) = NULL
+AS
+BEGIN
+
+  -- Si el filtro es NULL, no devolvemos datos ni se genera error
+  IF @vcFiltro IS NULL
+  BEGIN
+    RETURN; -- Simplemente terminamos la ejecución
+  END
+
+  --  numérico o no
+  IF ISNUMERIC(@vcFiltro) = 1
+  BEGIN
+    -- Búsqueda por Número de Documento
+     select 
+Per.kInPersonal,
+Per.vcApellidoPaterno COLLATE Modern_Spanish_CI_AS AS vcApellidoPaterno,
+Per.vcApellidoMaterno COLLATE Modern_Spanish_CI_AS AS vcApellidoMaterno,
+Per.vcPrimerNombre COLLATE Modern_Spanish_CI_AS AS vcPrimerNombre,
+Per.vcSegundoNombre COLLATE Modern_Spanish_CI_AS AS vcSegundoNombre,
+CONCAT(Per.vcApellidoPaterno, ' ', Per.vcApellidoMaterno, ' ', Per.vcPrimerNombre, ' ', Per.vcSegundoNombre) COLLATE Modern_Spanish_CI_AS AS vcNombreCompleto,
+--Per.dtFechaIngreso,
+FORMAT(Per.dtFechaIngreso, 'dd/MM/yyyy') AS dtFechaIngreso,
+
+Per.vcCodigo ,
+Per.inTipoDocumento,
+(SELECT TOP 1 vcNumeroDocumento FROM [BD_Personal].[dbo].[PersonalIdentificacion] WHERE kInPersonal = Per.kInPersonal AND inTipoDocumento IN (1,2,61)) AS vcNumeroDocumento,
+
+
+TP.inTipoPuesto,
+TP.vcTipoPuesto, 
+
+--(SELECT vcCategoriaP FROM [BD_RRHH].[dbo].[TbPTCategoriaPuesto] WHERE inCategoriaP = Pos.[inCategoria]) COLLATE Modern_Spanish_CI_AS AS vcCategoria,
+vcUsuario = (SELECT TOP 1 [vcComunicacion] FROM [BD_Personal].[dbo].[PersonalComunicacion] WHERE kInPersonal = Per.[kInPersonal] AND [inTipoComunicacion] =102 ORDER BY [inTipoComunicacion] ASC),
+vcComunicacion = (SELECT TOP 1 [vcComunicacion] FROM [MCPCLDAID01].[BD_Personal].[dbo].[PersonalComunicacion] WHERE kInPersonal = Per.[kInPersonal] AND [inTipoComunicacion] IN (46,47) ORDER BY [inTipoComunicacion] ASC),
+
+Per.[kInSeccion],
+vcNombreSeccion = (SELECT vcNombreSeccion FROM [MCPCLDAID01].[BD_Personal].[dbo].[Seccion] WHERE kInSeccion = Per.[kInSeccion]),
+vcPosicion = ( SELECT vcPosicion FROM [BD_RRHH].[dbo].[Posicion] WHERE inPosicion = Per.[inPosicion]),
+
+Pos.inJefeInmediato,--injefe
+    CONCAT(J.vcApellidoPaterno, ' ', J.vcApellidoMaterno, ' ', J.vcPrimerNombre, ' ', J.vcSegundoNombre) COLLATE Modern_Spanish_CI_AS AS vcJefeInmediato,--VcJefe
+
+Per.[kInVicePresidencia],
+vcNombreVicePresidencia = (SELECT vcNombreVicePresidencia FROM [MCPCLDAID01].[BD_Personal].[dbo].[VicePresidencia] WHERE kInVicePresidencia = Per.[kInVicePresidencia]),
+Per.[kInDepartamento],
+vcNombreDepartamento = (SELECT vcNombreDepartamento FROM [MCPCLDAID01].[BD_Personal].[dbo].[Departamento] WHERE kInDepartamento = Per.[kInDepartamento]),
+
+mime			= pa.vcMime,
+extension		= pa.vcExtension
+
+FROM [BD_Personal].[dbo].[Personal] Per
+LEFT JOIN [BD_Personal].[dbo].[PersonalArchivo] pa ON pa.kinpersonal = Per.kinpersonal and inTipoArchivo = 40
+Left JOIN [BD_RRHH].[dbo].[Posicion] AS Pos ON Pos.inPosicion = Per.inPosicion	
+Left JOIN [BD_RRHH].[dbo].[TbPTCategoriaPuesto] C ON C.inCategoriaP = Pos.inCategoria 
+Left JOIN [BD_RRHH].[dbo].TbPTTipoPuesto TP ON TP.inTipoPuesto =C.inTipoPuesto
+Left join [BD_Personal].[dbo].[Cargo] AS Car On Per.inCargo = Car.kinCodigoCargo
+LEFT JOIN BD_Personal.dbo.Personal AS J ON Pos.inJefeInmediato = J.inPosicion and J.dtFechaCese is null
+WHERE EXISTS (SELECT 1 FROM [BD_Personal].[dbo].[PersonalIdentificacion] PI WHERE PI.kInPersonal = Per.kInPersonal
+AND PI.vcNumeroDocumento  LIKE '%' + @vcFiltro + '%' -- = @vcFiltro
+AND PI.inTipoDocumento IN (1,2,61)  ) AND Per.dtFechaCese is null
+ORDER BY Per.vcApellidoPaterno ASC;
+END
+
+  ELSE
+  BEGIN
+    DECLARE @Palabra1 VARCHAR(50) = '', 
+            @Palabra2 VARCHAR(50) = '', 
+            @Palabra3 VARCHAR(50) = '', 
+            @Palabra4 VARCHAR(50) = '';
+
+    -- Dividir @vcFiltro en palabras clave
+    IF @vcFiltro IS NOT NULL AND LEN(@vcFiltro) > 0
+    BEGIN
+      DECLARE @pos INT = 1, @spaceIndex INT;
+
+      WHILE @pos <= 4 AND LEN(@vcFiltro) > 0
+      BEGIN
+        SET @spaceIndex = CHARINDEX(' ', @vcFiltro);
+        IF @spaceIndex = 0
+        BEGIN
+          -- No más espacios, el resto es una palabra.
+          SET @spaceIndex = LEN(@vcFiltro) + 1;
+        END
+
+        IF @pos = 1 SET @Palabra1 = LEFT(@vcFiltro, @spaceIndex - 1);
+        ELSE IF @pos = 2 SET @Palabra2 = LEFT(@vcFiltro, @spaceIndex - 1);
+        ELSE IF @pos = 3 SET @Palabra3 = LEFT(@vcFiltro, @spaceIndex - 1);
+        ELSE IF @pos = 4 SET @Palabra4 = LEFT(@vcFiltro, @spaceIndex - 1);
+
+        SET @vcFiltro = LTRIM(SUBSTRING(@vcFiltro, @spaceIndex + 1, LEN(@vcFiltro)));
+        SET @pos = @pos + 1;
+      END
+    END
+
+    -- Búsqueda por nombres y apellidos
+    -- Crear CTE para obtener registros únicos de Personal
+    ;
+	WITH CTE_Personal AS (
+     select 
+Per.kInPersonal,
+Per.vcApellidoPaterno COLLATE Modern_Spanish_CI_AS AS vcApellidoPaterno,
+Per.vcApellidoMaterno COLLATE Modern_Spanish_CI_AS AS vcApellidoMaterno,
+Per.vcPrimerNombre COLLATE Modern_Spanish_CI_AS AS vcPrimerNombre,
+Per.vcSegundoNombre COLLATE Modern_Spanish_CI_AS AS vcSegundoNombre,
+CONCAT(Per.vcApellidoPaterno, ' ', Per.vcApellidoMaterno, ' ', Per.vcPrimerNombre, ' ', Per.vcSegundoNombre) COLLATE Modern_Spanish_CI_AS AS vcNombreCompleto,
+--Per.dtFechaIngreso,
+FORMAT(Per.dtFechaIngreso, 'dd/MM/yyyy') AS dtFechaIngreso,
+
+Per.vcCodigo ,
+Per.inTipoDocumento,
+(SELECT TOP 1 vcNumeroDocumento FROM [BD_Personal].[dbo].[PersonalIdentificacion] WHERE kInPersonal = Per.kInPersonal AND inTipoDocumento IN (1,2,61)) AS vcNumeroDocumento,
+
+
+TP.inTipoPuesto,
+TP.vcTipoPuesto, 
+
+--(SELECT vcCategoriaP FROM [BD_RRHH].[dbo].[TbPTCategoriaPuesto] WHERE inCategoriaP = Pos.[inCategoria]) COLLATE Modern_Spanish_CI_AS AS vcCategoria,
+vcUsuario = (SELECT TOP 1 [vcComunicacion] FROM [BD_Personal].[dbo].[PersonalComunicacion] WHERE kInPersonal = Per.[kInPersonal] AND [inTipoComunicacion] =102 ORDER BY [inTipoComunicacion] ASC),
+vcComunicacion = (SELECT TOP 1 [vcComunicacion] FROM [MCPCLDAID01].[BD_Personal].[dbo].[PersonalComunicacion] WHERE kInPersonal = Per.[kInPersonal] AND [inTipoComunicacion] IN (46,47) ORDER BY [inTipoComunicacion] ASC),
+
+Per.[kInSeccion],
+vcNombreSeccion = (SELECT vcNombreSeccion FROM [MCPCLDAID01].[BD_Personal].[dbo].[Seccion] WHERE kInSeccion = Per.[kInSeccion]),
+vcPosicion = ( SELECT vcPosicion FROM [BD_RRHH].[dbo].[Posicion] WHERE inPosicion = Per.[inPosicion]),
+
+Pos.inJefeInmediato,--injefe
+    CONCAT(J.vcApellidoPaterno, ' ', J.vcApellidoMaterno, ' ', J.vcPrimerNombre, ' ', J.vcSegundoNombre) COLLATE Modern_Spanish_CI_AS AS vcJefeInmediato,--VcJefe
+
+Per.[kInVicePresidencia],
+vcNombreVicePresidencia = (SELECT vcNombreVicePresidencia FROM [MCPCLDAID01].[BD_Personal].[dbo].[VicePresidencia] WHERE kInVicePresidencia = Per.[kInVicePresidencia]),
+Per.[kInDepartamento],
+vcNombreDepartamento = (SELECT vcNombreDepartamento FROM [MCPCLDAID01].[BD_Personal].[dbo].[Departamento] WHERE kInDepartamento = Per.[kInDepartamento]),
+
+mime			= pa.vcMime,
+extension		= pa.vcExtension
+
+FROM [BD_Personal].[dbo].[Personal] Per
+LEFT JOIN [BD_Personal].[dbo].[PersonalArchivo] pa ON pa.kinpersonal = Per.kinpersonal and inTipoArchivo = 40
+Left JOIN [BD_RRHH].[dbo].[Posicion] AS Pos ON Pos.inPosicion = Per.inPosicion	
+Left JOIN [BD_RRHH].[dbo].[TbPTCategoriaPuesto] C ON C.inCategoriaP = Pos.inCategoria 
+Left JOIN [BD_RRHH].[dbo].TbPTTipoPuesto TP ON TP.inTipoPuesto =C.inTipoPuesto
+Left join [BD_Personal].[dbo].[Cargo] AS Car On Per.inCargo = Car.kinCodigoCargo
+LEFT JOIN BD_Personal.dbo.Personal AS J ON Pos.inJefeInmediato = J.inPosicion  and J.dtFechaCese is null
+      WHERE Per.dtFechaCese is null And (
+        Per.vcApellidoPaterno LIKE '%' + @Palabra1 + '%' OR
+        Per.vcApellidoMaterno LIKE '%' + @Palabra1 + '%' OR
+        Per.vcPrimerNombre LIKE '%' + @Palabra1 + '%' OR
+        Per.vcSegundoNombre LIKE '%' + @Palabra1 + '%'
+      ) AND (
+        Per.vcApellidoPaterno LIKE '%' + @Palabra2 + '%' OR
+        Per.vcApellidoMaterno LIKE '%' + @Palabra2 + '%' OR
+        Per.vcPrimerNombre LIKE '%' + @Palabra2 + '%' OR
+        Per.vcSegundoNombre LIKE '%' + @Palabra2 + '%'
+      ) AND (
+        Per.vcApellidoPaterno LIKE '%' + @Palabra3 + '%' OR
+        Per.vcApellidoMaterno LIKE '%' + @Palabra3 + '%' OR
+        Per.vcPrimerNombre LIKE '%' + @Palabra3 + '%' OR
+        Per.vcSegundoNombre LIKE '%' + @Palabra3 + '%'
+      ) AND (
+        Per.vcApellidoPaterno LIKE '%' + @Palabra4 + '%' OR
+        Per.vcApellidoMaterno LIKE '%' + @Palabra4 + '%' OR
+        Per.vcPrimerNombre LIKE '%' + @Palabra4 + '%' OR
+        Per.vcSegundoNombre LIKE '%' + @Palabra4 + '%'
+      )
+    )
+    SELECT
+      kInPersonal,
+      vcApellidoPaterno,
+      vcApellidoMaterno,
+      vcPrimerNombre,
+      vcSegundoNombre,
+      vcNombreCompleto,
+      dtFechaIngreso,
+	  vcCodigo,
+	  inTipoDocumento,
+	  vcNumeroDocumento,
+	  inTipoPuesto,
+	  vcTipoPuesto,
+	  vcUsuario,
+	  vcComunicacion,
+	  kInSeccion,
+	  vcNombreSeccion,
+	  vcPosicion,
+	  inJefeInmediato,
+	  vcJefeInmediato,
+	  kInVicePresidencia,
+	  vcNombreVicePresidencia,
+	  kInDepartamento,
+	  vcNombreDepartamento,
+	  mime,
+	  extension
+    FROM CTE_Personal
+	ORDER BY vcApellidoPaterno ASC;
+  END
+END;
